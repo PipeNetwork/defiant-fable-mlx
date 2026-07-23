@@ -65,32 +65,43 @@ While debugging this I also filed [Blaizzy/mlx-vlm#1665](https://github.com/Blai
 `BPEStreamingDetokenizer.add_token()` strict-decodes UTF-8 and crashes on byte-fallback
 tokens, which is what turned the numerical bug into an opaque `UnicodeDecodeError`.
 
-## Benchmark: 4bit vs nightmedia's mxfp4
+## Benchmark: all tiers vs the bf16 reference
 
-Both quantize the identical bf16 weights, so bf16 is exact ground truth and the
-quantization scheme is the only variable. 65,536 tokens of wikitext-2 test at 1024
+Every model here quantizes the identical bf16 weights, so bf16 is exact ground truth and
+the quantization scheme is the only variable. 65,536 tokens of wikitext-2 test at 1024
 context, all models fed the same token ids through mlx-lm (`bench.py`), M3 Ultra.
 
-| model | lang. weights | ppl | Δppl | KL(bf16‖q) | top-1 vs bf16 | decode |
-|---|---|---|---|---|---|---|
-| bf16 (reference) | 18.4 GB | 8.1273 | — | — | — | 39.0 t/s |
-| **pipenetwork 4bit** (affine g64) | 5.04 GB | **8.5816** | **+5.59%** | **0.0733** | **87.06%** | 109.9 t/s |
-| nightmedia mxfp4 (g32) | 4.76 GB | 8.9443 | +10.05% | 0.1133 | 82.34% | 114.4 t/s |
+| model | lang. weights | ppl | Δppl | KL(bf16‖q) | top-1 vs bf16 | prefill | decode |
+|---|---|---|---|---|---|---|---|
+| bf16 (reference) | 17.91 GB | 8.1273 | — | — | — | 1268 t/s | 38.9 t/s |
+| **8bit** (affine g64) | 9.51 GB | 8.1277 | +0.00% | 0.00124 | 98.24% | 1354 t/s | 67.3 t/s |
+| **6bit** (affine g64) | 7.28 GB | 8.1426 | +0.19% | 0.00523 | 96.20% | 1369 t/s | 80.4 t/s |
+| **4bit** (affine g64) | 5.04 GB | 8.5816 | +5.59% | 0.07330 | 87.06% | 1436 t/s | 109.1 t/s |
+| nightmedia mxfp4 (g32) | 4.76 GB | 8.9443 | +10.05% | 0.11328 | 82.34% | 1430 t/s | 113.8 t/s |
 
-The 4bit repo loses roughly **half** the perplexity that mxfp4 does, holds **35% lower
-KL** from the original distribution, and matches bf16's argmax **4.7 points** more often.
-mxfp4 decodes ~4% faster and is 0.3 GB smaller.
+**8bit is free.** It matches bf16 perplexity to four decimals (+0.00%) at KL 0.00124 and
+98.24% argmax agreement, for 47% of the weight footprint and 1.7x the decode speed. If
+you have the RAM there is no quality reason to run bf16.
 
-That is not a free win: affine 4-bit at group 64 spends 4.5 bits/weight versus MXFP4's
-4.25 (a shared E8M0 scale per 32 values), so ~6% more storage buys the accuracy. Both
-keep the vision tower at bf16 (0.91 GB each), and the vision tower is unused in a
-text-only perplexity run, so it does not affect the quality columns.
+**6bit is the sweet spot.** +0.19% perplexity and 96.2% agreement for 7.3 GB — a fifth of
+8bit's already-small error budget spent to save 2.2 GB and gain 20% decode speed.
 
-The gap is the weight format alone, not norm handling — see the note above; restoring
-exact norms in the mxfp4 repo changed its perplexity by nothing (8.944268 vs 8.9443).
+**The cliff is between 6bit and 4bit**, not where the even spacing suggests. KL jumps 14x
+(0.0052 → 0.0733) and perplexity goes from +0.19% to +5.59%. Anyone who can afford 7.3 GB
+should not be running 4bit.
 
-Reproduce with `python3 bench.py --tokens 65536 --seq-len 1024`. Perplexity depends on
-the corpus, so compare the columns against each other rather than against other papers.
+**4bit vs MXFP4**: at the 4-bit tier our affine g64 loses roughly *half* the perplexity
+MXFP4 does (+5.59% vs +10.05%), holds 35% lower KL, and matches bf16's argmax 4.7 points
+more often. That is not free — affine g64 spends 4.5 bits/weight against MXFP4's 4.25 (a
+shared E8M0 scale per 32 values), so ~6% more storage and ~4% slower decode buys it.
+
+Both keep the vision tower at bf16 (0.91 GB each); it is unused in a text-only perplexity
+run, so it does not affect the quality columns. Prefill is memory-bandwidth-bound and
+nearly flat across tiers; decode scales with weight size as expected.
+
+Reproduce with `python3 bench.py --tokens 65536 --seq-len 1024`. Perplexity is
+corpus-dependent, so compare the columns against each other rather than against other
+write-ups.
 
 ## Usage
 
