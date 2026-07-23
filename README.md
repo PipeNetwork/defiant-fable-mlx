@@ -3,18 +3,21 @@
 MLX conversion pipeline for **Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic** — a
 vision-enabled, uncensored Qwen3.5-9B merge — targeting Apple silicon.
 
-Published models:
+Published models, best quality first. Δppl is measured against the bf16 reference these
+were all converted from — see [the benchmark](#benchmark-all-tiers-vs-the-bf16-reference)
+for how, and for the two 2-bit tiers that were built, measured and deliberately not
+shipped.
 
-| Repo | Size | Bits/weight |
-|---|---|---|
-| [`pipenetwork/…-MLX-4bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-4bit) | 6.0 GB | 5.06 |
-| [`pipenetwork/…-MLX-3bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-3bit) | 4.5 GB | 4.11 |
-| [`pipenetwork/…-MLX-6bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-6bit) | 7.7 GB | 6.96 |
-| [`pipenetwork/…-MLX-5bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-5bit) | 6.6 GB | 6.01 |
-| [`pipenetwork/…-MLX-8bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-8bit) | 9.7 GB | 8.86 |
-| [`pipenetwork/…-MLX-bf16`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-bf16) | 18.8 GB | 16 |
+| Repo | Size | Bits/weight | Δppl vs bf16 | decode | verdict |
+|---|---|---|---|---|---|
+| [`…-MLX-bf16`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-bf16) | 18.8 GB | 16 | — | 38.6 t/s | exact reference |
+| [`…-MLX-8bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-8bit) | 9.7 GB | 8.86 | +0.00% | 66.9 t/s | free — no reason to run bf16 |
+| [`…-MLX-6bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-6bit) | 7.7 GB | 6.96 | +0.19% | 80.3 t/s | near-lossless |
+| [`…-MLX-5bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-5bit) | 6.6 GB | 6.01 | +0.91% | 91.5 t/s | **best quality-per-GB** |
+| [`…-MLX-4bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-4bit) | 6.0 GB | 5.06 | +5.59% | 108.6 t/s | usable floor; common default |
+| [`…-MLX-3bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-3bit) | 4.5 GB | 4.11 | +33.09% | 124.9 t/s | tight-memory fallback only |
 
-All four keep the 27-layer vision tower at bf16, so they load in **mlx-vlm** (image+text)
+All six keep the 27-layer vision tower at bf16, so they load in **mlx-vlm** (image+text)
 and **mlx-lm** (text-only) alike. On an M3 Ultra the 4bit runs ~110 tok/s at 5.2 GB peak.
 
 ## Provenance: the GGUF is not a distinct model
@@ -105,9 +108,10 @@ quantizations, 2 bits is simply not enough for this architecture.
 +10.05%), holds 35% lower KL, and matches bf16's argmax 4.7 points more often — at 4.5
 bits/weight against MXFP4's 4.25, so ~6% more storage and ~4% slower decode buys it.
 
-Both keep the vision tower at bf16 (0.91 GB each); it is unused in a text-only perplexity
-run, so it does not affect the quality columns. Prefill is memory-bandwidth-bound and
-nearly flat across tiers; decode scales with weight size as expected.
+Every tier here — ours and MXFP4 — keeps the vision tower at bf16 (0.91 GB), and it is
+unused in a text-only perplexity run, so it does not affect the quality columns. Prefill
+is memory-bandwidth-bound and nearly flat across tiers; decode scales with weight size as
+expected.
 
 Reproduce with `python3 bench.py --tokens 65536 --seq-len 1024`. Perplexity is
 corpus-dependent, so compare the columns against each other rather than against other
@@ -130,6 +134,10 @@ against the bf16 model, flagging any tensor far from the median error. Rebuildin
 8.2012 above. Re-checking the already-published 4/6/8bit repos under the stronger test:
 24/24 clean on each.
 
+The same check honours per-module quantization overrides, so mixed recipes like
+`mixed_2_6` are judged within each bit width rather than against a single default —
+otherwise its 6-bit layers read as corrupt when dequantized at 2 bits.
+
 ## Usage
 
 ```bash
@@ -142,12 +150,17 @@ for f in preprocessor_config.json video_preprocessor_config.json; do
 done
 
 ./build.sh                          # convert -> fix_norms -> verify, per quant
-python3 publish.py 4bit 6bit 8bit bf16
+python3 publish.py 3bit 4bit 5bit 6bit 8bit bf16
 ```
 
-`build.sh` refuses to move on until `verify.py` passes, which requires unquantized
-tensors to still match the source bit-for-bit **and** mlx-lm and mlx-vlm to agree on the
-logits (cos ≈ 1.0). Measured: 1.000000 / 0.999950 / 1.000000 / 1.000000.
+`build.sh` refuses to move on until `verify.py` passes. That gate requires unquantized
+tensors to still match the source bit-for-bit, sampled quantized tensors to dequantize
+within tolerance of the bf16 model, **and** mlx-lm and mlx-vlm to agree on the logits
+(cos ≈ 1.0). Measured across bf16/8/6/5/4/3-bit: 1.000000 / 1.000000 / 0.999950 /
+1.000000 / 1.000000 / 1.000000.
+
+The 2-bit tiers are built by `build.sh` but were not published; drop those lines if you
+do not want them on disk.
 
 Paths in the scripts point at `/Volumes/models/defiant-fable`; edit `ROOT` to relocate.
 
@@ -156,9 +169,9 @@ Paths in the scripts point at `/Volumes/models/defiant-fable`; edit `ROOT` to re
 | File | Purpose |
 |---|---|
 | `verify_provenance.py` | Proves the GGUF is a requant of the bf16 source, via HTTP range reads |
-| `build.sh` | convert → fix_norms → verify for bf16/8bit/6bit/4bit |
+| `build.sh` | convert → fix_norms → verify for every tier (bf16 → 2bit) |
 | `fix_norms.py` | Rewrites norms + conv1d in raw HF convention so every loader shifts once |
-| `verify.py` | Gates on source integrity + mlx-lm/mlx-vlm logit agreement |
+| `verify.py` | Gates on source integrity, quantized-weight sanity vs bf16, and mlx-lm/mlx-vlm logit agreement |
 | `bench.py` | ppl / KL / top-1 / throughput vs the bf16 reference |
 | `publish.py` | Renders the model card per quant and uploads to the Hub |
 | `card_template.md` | Model card template |
@@ -167,7 +180,8 @@ Paths in the scripts point at `/Volumes/models/defiant-fable`; edit `ROOT` to re
 
 - MTP weights are dropped — no MLX loader uses them. That costs only the speculative
   decoding speedup the GGUF "MTP" variants advertise, not quality.
-- The vision tower stays bf16 in every tier, which is why 4bit measures 5.06 bits/weight.
+- The vision tower stays bf16 in every tier (0.91 GB), which is why the reported
+  bits/weight run above the nominal width — 4bit measures 5.06.
 - Sampling: temperature ≤ 1.0, repetition penalty 1.0 (off). Raising either hurts.
 
 ## License
