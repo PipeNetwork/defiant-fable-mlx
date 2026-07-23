@@ -3,7 +3,8 @@
 MLX conversion pipeline for **Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic** — a
 vision-enabled, uncensored Qwen3.5-9B merge — targeting Apple silicon.
 
-Published models, best quality first. Δppl is measured against the bf16 reference these
+Published models, best quality first. Sizes are the full repo in base-10 GB, as
+Hugging Face reports them. Δppl is measured against the bf16 reference these
 were all converted from — see [the benchmark](#benchmark-all-tiers-vs-the-bf16-reference)
 for how, and for the two 2-bit tiers that were built, measured and deliberately not
 shipped.
@@ -11,11 +12,11 @@ shipped.
 | Repo | Size | Bits/weight | Δppl vs bf16 | decode | verdict |
 |---|---|---|---|---|---|
 | [`…-MLX-bf16`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-bf16) | 18.8 GB | 16 | — | 38.6 t/s | exact reference |
-| [`…-MLX-8bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-8bit) | 9.7 GB | 8.86 | +0.00% | 66.9 t/s | free — no reason to run bf16 |
-| [`…-MLX-6bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-6bit) | 7.7 GB | 6.96 | +0.19% | 80.3 t/s | near-lossless |
-| [`…-MLX-5bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-5bit) | 6.6 GB | 6.01 | +0.91% | 91.5 t/s | **best quality-per-GB** |
+| [`…-MLX-8bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-8bit) | 10.4 GB | 8.86 | +0.00% | 66.9 t/s | free — no reason to run bf16 |
+| [`…-MLX-6bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-6bit) | 8.2 GB | 6.96 | +0.19% | 80.3 t/s | near-lossless |
+| [`…-MLX-5bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-5bit) | 7.1 GB | 6.01 | +0.91% | 91.5 t/s | **best quality-per-GB** |
 | [`…-MLX-4bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-4bit) | 6.0 GB | 5.06 | +5.59% | 108.6 t/s | usable floor; common default |
-| [`…-MLX-3bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-3bit) | 4.5 GB | 4.11 | +33.09% | 124.9 t/s | tight-memory fallback only |
+| [`…-MLX-3bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-3bit) | 4.8 GB | 4.11 | +33.09% | 124.9 t/s | tight-memory fallback only |
 
 All six keep the 27-layer vision tower at bf16, so they load in **mlx-vlm** (image+text)
 and **mlx-lm** (text-only) alike. On an M3 Ultra the 4bit runs ~110 tok/s at 5.2 GB peak.

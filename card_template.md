@@ -94,16 +94,40 @@ prompt = apply_chat_template(processor, config, "Describe this image.", num_imag
 print(generate(model, processor, prompt, ["your_image.jpg"], max_tokens=512, verbose=False))
 ```
 
-## Quantizations
+## All quantizations, measured
 
-| Repo | Bits | Size |
-|---|---|---|
-| [...-MLX-4bit](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-4bit) | 4 | __SZ4__ |
-| [...-MLX-6bit](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-6bit) | 6 | __SZ6__ |
-| [...-MLX-8bit](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-8bit) | 8 | __SZ8__ |
-| [...-MLX-bf16](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-bf16) | 16 | __SZ16__ |
+Every tier below quantizes the *identical* bf16 weights, so bf16 is exact ground truth and
+the quantization scheme is the only variable. Measured on 65,536 tokens of wikitext-2 test
+at 1024 context, all models fed the same token ids through mlx-lm, on an M3 Ultra. KL is
+against bf16's own output distribution — lower means closer to the original model.
 
-Group size 64, `affine` mode. The vision tower is left unquantized (mlx-vlm's default for multimodal projector/patch-embed modules), so the size delta between tiers comes from the language model.
+| Repo | Size | Bits/w | ppl | Δppl | KL(bf16‖q) | top-1 | decode | verdict |
+|---|---|---|---|---|---|---|---|---|
+| [bf16](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-bf16) | __SZ16__ | 16 | 8.1273 | — | — | — | 38.6 t/s | exact reference |
+| [8bit](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-8bit) | __SZ8__ | 8.86 | 8.1277 | +0.00% | 0.00124 | 98.24% | 66.9 t/s | free — no reason to run bf16 |
+| [6bit](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-6bit) | __SZ6__ | 6.96 | 8.1426 | +0.19% | 0.00523 | 96.20% | 80.3 t/s | near-lossless |
+| [5bit](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-5bit) | __SZ5__ | 6.01 | 8.2012 | +0.91% | 0.01845 | 93.24% | 91.5 t/s | **best quality-per-GB** |
+| [4bit](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-4bit) | __SZ4__ | 5.06 | 8.5816 | +5.59% | 0.07330 | 87.06% | 108.6 t/s | usable floor; common default |
+| [3bit](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-3bit) | __SZ3__ | 4.11 | 10.8167 | +33.09% | 0.32843 | 73.44% | 124.9 t/s | tight-memory fallback only |
+| [nightmedia mxfp4](https://huggingface.co/nightmedia/Qwen3.5-9B-DS9-USS-Defiant-mxfp4-mlx) | 5.6 GB | 4.25 | 8.9443 | +10.05% | 0.11328 | 82.34% | 113.5 t/s | for comparison |
+
+Sizes are the full repo; `Bits/w` is the whole-model average, which sits above the nominal
+width because the vision tower stays bf16 (0.91 GB) in every tier. All tiers are group size
+64, `affine` mode.
+
+Reading it:
+
+- **8bit is effectively free** — bf16 perplexity to four decimals at 47% of the footprint.
+- **5bit is the best quality-per-GB**: under 1% perplexity.
+- **The usable floor is 4bit.** 3bit still answers factual questions correctly but costs
+  +33% perplexity; treat it as a tight-memory fallback.
+- **No 2-bit tier is published.** Pure 2-bit collapses (ppl 214.5, 28% top-1) and MLX's
+  `mixed_2_6` recipe, while grammatical, still runs ~7x bf16 perplexity at 3.94 GB — no
+  smaller than 3bit and 5x worse. Both were built and measured; neither is usable.
+- At the 4-bit tier this affine group-64 quant loses about half the perplexity MXFP4 does,
+  costing 4.5 vs 4.25 bits/weight.
+
+Reproduce with [`bench.py`](https://github.com/PipeNetwork/defiant-fable-mlx).
 
 ## Sampling
 
