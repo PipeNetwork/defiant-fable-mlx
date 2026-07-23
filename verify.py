@@ -39,6 +39,10 @@ def check_quantized_weights(M, n_sample=24):
     if not cfg:
         return True
     gs, bits = cfg["group_size"], cfg["bits"]
+    # Mixed recipes (e.g. mixed_2_6) store per-module overrides alongside the
+    # top-level defaults; dequantizing a 6-bit layer with the 2-bit default
+    # would read as corruption. Group by the bit width actually used.
+    per_layer = {k: v for k, v in cfg.items() if isinstance(v, dict)}
     BF = str(Path(M).parent / (Path(M).name.rsplit("-", 1)[0] + "-bf16"))
     if not Path(BF).exists():
         print(f"  (no bf16 reference at {BF}; skipping quantized-weight check)")
@@ -55,24 +59,30 @@ def check_quantized_weights(M, n_sample=24):
         base = sk[: -len(".scales")]
         if base + ".weight" not in wb:
             continue
+        lg = per_layer.get(base, {})
+        lbits, lgs = lg.get("bits", bits), lg.get("group_size", gs)
         q = mx.load(M + "/" + wq[base + ".weight"])[base + ".weight"]
         s = mx.load(M + "/" + wq[sk])[sk]
         b = mx.load(M + "/" + wq[base + ".biases"])[base + ".biases"]
-        dq = mx.dequantize(q, s, b, group_size=gs, bits=bits).astype(mx.float32)
+        dq = mx.dequantize(q, s, b, group_size=lgs, bits=lbits).astype(mx.float32)
         ref = mx.load(BF + "/" + wb[base + ".weight"])[base + ".weight"].astype(mx.float32)
         if dq.shape != ref.shape:
-            errs.append((base, float("inf")))
+            errs.append((base, lbits, float("inf")))
             continue
-        errs.append((base, float((mx.linalg.norm(ref - dq) / mx.linalg.norm(ref)).item())))
+        errs.append((base, lbits, float((mx.linalg.norm(ref - dq) / mx.linalg.norm(ref)).item())))
 
-    vals = sorted(e for _, e in errs)
-    median = vals[len(vals) // 2]
-    # 3x the median is far outside the spread real quantization noise produces
-    bad = [(k, e) for k, e in errs if e > max(3 * median, median + 0.05)]
-    for k, e in bad:
-        print(f"  CORRUPT {k}  rel_err={e:.5f} (median {median:.5f})")
-    print(f"  quantized weights: {len(errs) - len(bad)}/{len(errs)} within tolerance "
-          f"(median rel_err {median:.5f})")
+    # compare each tensor only against others quantized at the same bit width
+    bad, summary = [], []
+    for w in sorted({b for _, b, _ in errs}):
+        grp = [(k, e) for k, bb, e in errs if bb == w]
+        vals = sorted(e for _, e in grp)
+        median = vals[len(vals) // 2]
+        hits = [(k, e) for k, e in grp if e > max(3 * median, median + 0.05)]
+        bad += hits
+        summary.append(f"{w}-bit: {len(grp) - len(hits)}/{len(grp)} ok (median {median:.5f})")
+        for k, e in hits:
+            print(f"  CORRUPT {k}  rel_err={e:.5f} ({w}-bit median {median:.5f})")
+    print(f"  quantized weights: {'; '.join(summary)}")
     return not bad
 
 

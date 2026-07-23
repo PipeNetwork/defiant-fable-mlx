@@ -8,6 +8,7 @@ Published models:
 | Repo | Size | Bits/weight |
 |---|---|---|
 | [`pipenetwork/…-MLX-4bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-4bit) | 6.0 GB | 5.06 |
+| [`pipenetwork/…-MLX-3bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-3bit) | 4.5 GB | 4.11 |
 | [`pipenetwork/…-MLX-6bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-6bit) | 7.7 GB | 6.96 |
 | [`pipenetwork/…-MLX-5bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-5bit) | 6.6 GB | 6.01 |
 | [`pipenetwork/…-MLX-8bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-8bit) | 9.7 GB | 8.86 |
@@ -74,26 +75,35 @@ context, all models fed the same token ids through mlx-lm (`bench.py`), M3 Ultra
 
 | model | lang. weights | ppl | Δppl | KL(bf16‖q) | top-1 vs bf16 | prefill | decode |
 |---|---|---|---|---|---|---|---|
-| bf16 (reference) | 17.91 GB | 8.1273 | — | — | — | 1293 t/s | 39.2 t/s |
-| **8bit** (affine g64) | 9.51 GB | 8.1277 | +0.00% | 0.00124 | 98.24% | 1390 t/s | 67.9 t/s |
-| **6bit** (affine g64) | 7.28 GB | 8.1426 | +0.19% | 0.00523 | 96.20% | 1349 t/s | 80.9 t/s |
-| **5bit** (affine g64) | 6.16 GB | 8.2012 | +0.91% | 0.01845 | 93.24% | 1381 t/s | 92.5 t/s |
-| **4bit** (affine g64) | 5.04 GB | 8.5816 | +5.59% | 0.07330 | 87.06% | 1415 t/s | 110.0 t/s |
-| nightmedia mxfp4 (g32) | 4.76 GB | 8.9443 | +10.05% | 0.11328 | 82.34% | 1403 t/s | 114.7 t/s |
+| bf16 (reference) | 17.91 GB | 8.1273 | — | — | — | 1279 t/s | 38.6 t/s |
+| **8bit** (affine g64) | 9.51 GB | 8.1277 | +0.00% | 0.00124 | 98.24% | 1379 t/s | 66.9 t/s |
+| **6bit** (affine g64) | 7.28 GB | 8.1426 | +0.19% | 0.00523 | 96.20% | 1368 t/s | 80.3 t/s |
+| **5bit** (affine g64) | 6.16 GB | 8.2012 | +0.91% | 0.01845 | 93.24% | 1383 t/s | 91.5 t/s |
+| **4bit** (affine g64) | 5.04 GB | 8.5816 | +5.59% | 0.07330 | 87.06% | 1432 t/s | 108.6 t/s |
+| **3bit** (affine g64) | 3.92 GB | 10.8167 | +33.09% | 0.32843 | 73.44% | 1433 t/s | 124.9 t/s |
+| 2bit mixed_2_6 *(not published)* | 3.94 GB | 59.4433 | +631.4% | 2.11814 | 41.18% | — | — |
+| 2bit pure *(not published)* | 2.80 GB | 214.5069 | +2539.3% | 3.41886 | 28.04% | 1449 t/s | 151.0 t/s |
+| nightmedia mxfp4 (g32) | 4.76 GB | 8.9443 | +10.05% | 0.11328 | 82.34% | 1425 t/s | 113.5 t/s |
 
 **8bit is free.** It matches bf16 perplexity to four decimals at KL 0.00124 and 98.24%
-argmax agreement, for 47% of the weight footprint and 1.7x the decode speed. If you have
-the RAM there is no quality reason to run bf16.
+argmax agreement, for 47% of the weight footprint and 1.7x the decode speed.
 
-**The cliff is 5bit → 4bit, not 6bit → 4bit.** KL roughly triples from 6bit to 5bit
-(0.0052 → 0.0185) but then jumps 4x again into 4bit (→ 0.0733), and perplexity goes
-+0.91% → +5.59%. 5bit costs under 1% perplexity for 6.2 GB, which makes it the best
-quality-per-GB in the set and the tier to pick if 4bit feels lossy.
+**5bit is the best quality-per-GB** at +0.91%, and **the usable floor is 4bit.** 3bit is
+still coherent — it answers factual questions correctly — but +33% perplexity and 73%
+argmax agreement make it a fallback for tight memory, not a default.
 
-**4bit vs MXFP4**: at the 4-bit tier affine g64 loses roughly *half* the perplexity MXFP4
-does (+5.59% vs +10.05%), holds 35% lower KL, and matches bf16's argmax 4.7 points more
-often — at 4.5 bits/weight against MXFP4's 4.25 (a shared E8M0 scale per 32 values), so
-~6% more storage and ~4% slower decode buys it.
+**No 2-bit tier is viable for this model, so none is published.** Pure 2-bit affine
+collapses to ppl 214.5 (+2539%, 28% top-1) and fails "the capital of Japan is …",
+answering with a stray `<|im_end|>` and then nonsense. MLX's `mixed_2_6` recipe (2-bit
+with sensitive layers at 6-bit) recovers a lot — ppl 59.4, 41% top-1, and it stays
+grammatical — but it is still ~7x bf16 perplexity, and at **3.94 GB it is no smaller than
+3bit's 3.92 GB while being 5x worse**. There is no size argument for it. Both were built
+and measured; neither is on the Hub. Note both passed `verify.py` — they are *correct*
+quantizations, 2 bits is simply not enough for this architecture.
+
+**4bit vs MXFP4**: affine g64 loses roughly *half* the perplexity MXFP4 does (+5.59% vs
++10.05%), holds 35% lower KL, and matches bf16's argmax 4.7 points more often — at 4.5
+bits/weight against MXFP4's 4.25, so ~6% more storage and ~4% slower decode buys it.
 
 Both keep the vision tower at bf16 (0.91 GB each); it is unused in a text-only perplexity
 run, so it does not affect the quality columns. Prefill is memory-bandwidth-bound and

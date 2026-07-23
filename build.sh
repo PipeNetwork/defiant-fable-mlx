@@ -35,6 +35,8 @@ build 8bit -q --q-bits 8 --q-group-size 64
 build 6bit -q --q-bits 6 --q-group-size 64
 build 5bit -q --q-bits 5 --q-group-size 64
 build 4bit -q --q-bits 4 --q-group-size 64
+build 3bit -q --q-bits 3 --q-group-size 64
+build 2bit -q --q-bits 2 --q-group-size 64
 
 echo "== all done"
 du -sh "$ROOT/$NAME"-*

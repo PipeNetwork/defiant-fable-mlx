@@ -35,6 +35,8 @@ PATHS = {
     "pipenetwork 6bit (affine g64)": ROOT / f"{NAME}-6bit",
     "pipenetwork 5bit (affine g64)": ROOT / f"{NAME}-5bit",
     "pipenetwork 4bit (affine g64)": ROOT / f"{NAME}-4bit",
+    "pipenetwork 3bit (affine g64)": ROOT / f"{NAME}-3bit",
+    "pipenetwork 2bit (affine g64)": ROOT / f"{NAME}-2bit",
     "nightmedia mxfp4 (g32)": ROOT / "mxfp4",
 }
 QUANTS = [k for k in PATHS if k != REF]
