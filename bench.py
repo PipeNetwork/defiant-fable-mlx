@@ -33,6 +33,7 @@ PATHS = {
     REF: ROOT / f"{NAME}-bf16",
     "pipenetwork 8bit (affine g64)": ROOT / f"{NAME}-8bit",
     "pipenetwork 6bit (affine g64)": ROOT / f"{NAME}-6bit",
+    "pipenetwork 5bit (affine g64)": ROOT / f"{NAME}-5bit",
     "pipenetwork 4bit (affine g64)": ROOT / f"{NAME}-4bit",
     "nightmedia mxfp4 (g32)": ROOT / "mxfp4",
 }

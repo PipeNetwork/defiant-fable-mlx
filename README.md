@@ -9,6 +9,7 @@ Published models:
 |---|---|---|
 | [`pipenetwork/…-MLX-4bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-4bit) | 6.0 GB | 5.06 |
 | [`pipenetwork/…-MLX-6bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-6bit) | 7.7 GB | 6.96 |
+| [`pipenetwork/…-MLX-5bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-5bit) | 6.6 GB | 6.01 |
 | [`pipenetwork/…-MLX-8bit`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-8bit) | 9.7 GB | 8.86 |
 | [`pipenetwork/…-MLX-bf16`](https://huggingface.co/pipenetwork/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-MLX-bf16) | 18.8 GB | 16 |
 
@@ -73,27 +74,26 @@ context, all models fed the same token ids through mlx-lm (`bench.py`), M3 Ultra
 
 | model | lang. weights | ppl | Δppl | KL(bf16‖q) | top-1 vs bf16 | prefill | decode |
 |---|---|---|---|---|---|---|---|
-| bf16 (reference) | 17.91 GB | 8.1273 | — | — | — | 1268 t/s | 38.9 t/s |
-| **8bit** (affine g64) | 9.51 GB | 8.1277 | +0.00% | 0.00124 | 98.24% | 1354 t/s | 67.3 t/s |
-| **6bit** (affine g64) | 7.28 GB | 8.1426 | +0.19% | 0.00523 | 96.20% | 1369 t/s | 80.4 t/s |
-| **4bit** (affine g64) | 5.04 GB | 8.5816 | +5.59% | 0.07330 | 87.06% | 1436 t/s | 109.1 t/s |
-| nightmedia mxfp4 (g32) | 4.76 GB | 8.9443 | +10.05% | 0.11328 | 82.34% | 1430 t/s | 113.8 t/s |
+| bf16 (reference) | 17.91 GB | 8.1273 | — | — | — | 1293 t/s | 39.2 t/s |
+| **8bit** (affine g64) | 9.51 GB | 8.1277 | +0.00% | 0.00124 | 98.24% | 1390 t/s | 67.9 t/s |
+| **6bit** (affine g64) | 7.28 GB | 8.1426 | +0.19% | 0.00523 | 96.20% | 1349 t/s | 80.9 t/s |
+| **5bit** (affine g64) | 6.16 GB | 8.2012 | +0.91% | 0.01845 | 93.24% | 1381 t/s | 92.5 t/s |
+| **4bit** (affine g64) | 5.04 GB | 8.5816 | +5.59% | 0.07330 | 87.06% | 1415 t/s | 110.0 t/s |
+| nightmedia mxfp4 (g32) | 4.76 GB | 8.9443 | +10.05% | 0.11328 | 82.34% | 1403 t/s | 114.7 t/s |
 
-**8bit is free.** It matches bf16 perplexity to four decimals (+0.00%) at KL 0.00124 and
-98.24% argmax agreement, for 47% of the weight footprint and 1.7x the decode speed. If
-you have the RAM there is no quality reason to run bf16.
+**8bit is free.** It matches bf16 perplexity to four decimals at KL 0.00124 and 98.24%
+argmax agreement, for 47% of the weight footprint and 1.7x the decode speed. If you have
+the RAM there is no quality reason to run bf16.
 
-**6bit is the sweet spot.** +0.19% perplexity and 96.2% agreement for 7.3 GB — a fifth of
-8bit's already-small error budget spent to save 2.2 GB and gain 20% decode speed.
+**The cliff is 5bit → 4bit, not 6bit → 4bit.** KL roughly triples from 6bit to 5bit
+(0.0052 → 0.0185) but then jumps 4x again into 4bit (→ 0.0733), and perplexity goes
++0.91% → +5.59%. 5bit costs under 1% perplexity for 6.2 GB, which makes it the best
+quality-per-GB in the set and the tier to pick if 4bit feels lossy.
 
-**The cliff is between 6bit and 4bit**, not where the even spacing suggests. KL jumps 14x
-(0.0052 → 0.0733) and perplexity goes from +0.19% to +5.59%. Anyone who can afford 7.3 GB
-should not be running 4bit.
-
-**4bit vs MXFP4**: at the 4-bit tier our affine g64 loses roughly *half* the perplexity
-MXFP4 does (+5.59% vs +10.05%), holds 35% lower KL, and matches bf16's argmax 4.7 points
-more often. That is not free — affine g64 spends 4.5 bits/weight against MXFP4's 4.25 (a
-shared E8M0 scale per 32 values), so ~6% more storage and ~4% slower decode buys it.
+**4bit vs MXFP4**: at the 4-bit tier affine g64 loses roughly *half* the perplexity MXFP4
+does (+5.59% vs +10.05%), holds 35% lower KL, and matches bf16's argmax 4.7 points more
+often — at 4.5 bits/weight against MXFP4's 4.25 (a shared E8M0 scale per 32 values), so
+~6% more storage and ~4% slower decode buys it.
 
 Both keep the vision tower at bf16 (0.91 GB each); it is unused in a text-only perplexity
 run, so it does not affect the quality columns. Prefill is memory-bandwidth-bound and
@@ -102,6 +102,23 @@ nearly flat across tiers; decode scales with weight size as expected.
 Reproduce with `python3 bench.py --tokens 65536 --seq-len 1024`. Perplexity is
 corpus-dependent, so compare the columns against each other rather than against other
 write-ups.
+
+### A corrupt build that passed the old checks
+
+The first 5bit build measured ppl 14.61 (+79.8%) — worse than 4bit. It was not a property
+of 5-bit quantization: `mx.quantize`/`dequantize`, `quantized_matmul` and
+`QuantizedEmbedding` are all exact at 5 bits in isolation, and the stored weights
+dequantized to the expected 0.045 error. A layer-by-layer bisect against bf16 showed
+layers 0-25 healthy (cos ~0.998) and a collapse at layer 26, which traced to three
+tensors written as garbage (`26.linear_attn.out_proj`, `26.mlp.down_proj`,
+`27.self_attn.q_proj`, rel_err ~1.4) in an otherwise-fine shard — a bad write, matching an
+earlier convert of the same model that died mid-write.
+
+`verify.py` had missed it: on quantized repos it only sampled norms and conv1d, never the
+quantized projections. It now dequantizes sampled quantized tensors and compares them
+against the bf16 model, flagging any tensor far from the median error. Rebuilding gave the
+8.2012 above. Re-checking the already-published 4/6/8bit repos under the stronger test:
+24/24 clean on each.
 
 ## Usage
 

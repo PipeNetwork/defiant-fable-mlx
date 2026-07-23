@@ -4,6 +4,7 @@ mlx-vlm both produce sane, mutually consistent logits."""
 import json
 import random
 import sys
+from pathlib import Path
 
 import mlx.core as mx
 import numpy as np
@@ -23,6 +24,56 @@ def rev(k):
     if k == "language_model.lm_head.weight":
         return "lm_head.weight"
     return k
+
+
+def check_quantized_weights(M, n_sample=24):
+    """Dequantize sampled quantized tensors and compare against the bf16 model.
+
+    Quantization error is tight and highly uniform across tensors at a given bit
+    width (~0.045 at 5-bit, ~0.092 at 4-bit), so a tensor that lands far from the
+    median is a corrupt write, not quantization noise. Sampling only norms and
+    conv1d -- as this script used to -- misses that entirely: a shard can carry
+    garbage projections and still pass.
+    """
+    cfg = json.load(open(M + "/config.json")).get("quantization")
+    if not cfg:
+        return True
+    gs, bits = cfg["group_size"], cfg["bits"]
+    BF = str(Path(M).parent / (Path(M).name.rsplit("-", 1)[0] + "-bf16"))
+    if not Path(BF).exists():
+        print(f"  (no bf16 reference at {BF}; skipping quantized-weight check)")
+        return True
+
+    wq = json.load(open(M + "/model.safetensors.index.json"))["weight_map"]
+    wb = json.load(open(BF + "/model.safetensors.index.json"))["weight_map"]
+    scale_keys = sorted(k for k in wq if k.endswith(".scales"))
+    random.seed(1)
+    picks = random.sample(scale_keys, min(n_sample, len(scale_keys)))
+
+    errs = []
+    for sk in picks:
+        base = sk[: -len(".scales")]
+        if base + ".weight" not in wb:
+            continue
+        q = mx.load(M + "/" + wq[base + ".weight"])[base + ".weight"]
+        s = mx.load(M + "/" + wq[sk])[sk]
+        b = mx.load(M + "/" + wq[base + ".biases"])[base + ".biases"]
+        dq = mx.dequantize(q, s, b, group_size=gs, bits=bits).astype(mx.float32)
+        ref = mx.load(BF + "/" + wb[base + ".weight"])[base + ".weight"].astype(mx.float32)
+        if dq.shape != ref.shape:
+            errs.append((base, float("inf")))
+            continue
+        errs.append((base, float((mx.linalg.norm(ref - dq) / mx.linalg.norm(ref)).item())))
+
+    vals = sorted(e for _, e in errs)
+    median = vals[len(vals) // 2]
+    # 3x the median is far outside the spread real quantization noise produces
+    bad = [(k, e) for k, e in errs if e > max(3 * median, median + 0.05)]
+    for k, e in bad:
+        print(f"  CORRUPT {k}  rel_err={e:.5f} (median {median:.5f})")
+    print(f"  quantized weights: {len(errs) - len(bad)}/{len(errs)} within tolerance "
+          f"(median rel_err {median:.5f})")
+    return not bad
 
 
 def check_integrity(M, quantized):
@@ -89,6 +140,8 @@ if __name__ == "__main__":
     quantized = "bf16" not in M
     print(f"== {M.split('/')[-1]}")
     a = check_integrity(M, quantized)
+    q = check_quantized_weights(M) if quantized else True
     b = check_loaders(M)
-    print(f"  RESULT: {'PASS' if (a and b) else 'FAIL'}")
-    sys.exit(0 if (a and b) else 1)
+    ok = a and q and b
+    print(f"  RESULT: {'PASS' if ok else 'FAIL'}")
+    sys.exit(0 if ok else 1)
